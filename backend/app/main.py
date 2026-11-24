@@ -44,12 +44,17 @@ async def lifespan(app: FastAPI):
         try:
             async with sessionmaker()() as session:
                 await ensure_defaults(session)
+                from sqlalchemy import text  # noqa: PLC0415
+                db_identity = (await session.execute(text("SELECT current_database(), current_schema(), current_user"))).one()
+                before_count = (await session.execute(text("SELECT COUNT(*) FROM businesses"))).scalar_one()
+                log.info("startup database identity: database=%s schema=%s user=%s businesses_before=%s", *db_identity, before_count)
                 if s.demo_mode:
                     from app.services.demo import ensure_seeded  # noqa: PLC0415
 
                     log.info("demo seeding: starting")
                     await ensure_seeded(session)
-                    log.info("demo seeding: completed")
+                    after_count = (await session.execute(text("SELECT COUNT(*) FROM businesses"))).scalar_one()
+                    log.info("demo seeding: completed businesses_after=%s", after_count)
                 else:
                     log.info("demo seeding: skipped (DEMO_MODE is false)")
         except Exception:
