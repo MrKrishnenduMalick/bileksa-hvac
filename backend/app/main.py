@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI):
             async with sessionmaker()() as session:
                 await ensure_defaults(session)
                 from sqlalchemy import text  # noqa: PLC0415
+                from sqlalchemy.engine import make_url  # noqa: PLC0415
+                db_url = make_url(s.database_url)
+                supabase_host = make_url(s.supabase_url).host if s.supabase_url else "unset"
+                log.info("startup connection target: db_host=%s db_port=%s db_name=%s db_user=%s supabase_host=%s", db_url.host, db_url.port, db_url.database, db_url.username, supabase_host)
                 db_identity = (await session.execute(text("SELECT current_database(), current_schema(), current_user"))).one()
                 before_count = (await session.execute(text("SELECT COUNT(*) FROM businesses"))).scalar_one()
                 log.info("startup database identity: database=%s schema=%s user=%s businesses_before=%s", *db_identity, before_count)
