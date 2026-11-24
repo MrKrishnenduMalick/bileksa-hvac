@@ -1,0 +1,34 @@
+name: Sync Vapi Tools
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --frozen --no-dev
+
+      - name: Sync Vapi tools
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PUBLIC_API_URL: ${{ secrets.PUBLIC_API_URL }}
+          VAPI_PRIVATE_KEY: ${{ secrets.VAPI_PRIVATE_KEY }}
+        run: uv run --frozen python -m app.cli setup-vapi-tools
