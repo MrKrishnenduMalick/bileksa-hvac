@@ -1,0 +1,74 @@
+# Render Blueprint for the PUBLIC DEMO API only (free web service, no card needed).
+# Native Python runtime: Render builds and runs the app itself; no Docker, no server of ours.
+# Paying clients: use the Railway setup in backend/railway.json (or a paid Render instance),
+# never the free instance, which sleeps after 15 minutes without traffic.
+#
+# Secrets marked sync:false are entered in the Render dashboard, never committed.
+services:
+  - type: web
+    name: bileksa-demo-api
+    runtime: python
+    plan: free
+    region: ohio
+    rootDir: backend
+    buildCommand: pip install --quiet "uv>=0.8" && uv sync --frozen --no-dev --python "$(command -v python)"
+    # migrations are additive and safe to repeat; then the API (single instance)
+    startCommand: .venv/bin/alembic upgrade head && exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: ENVIRONMENT
+        value: production
+      - key: DEMO_MODE
+        value: "true"
+      - key: REQUIRE_ADMIN_MFA
+        value: "false"
+      - key: RUN_SWEEP_ON_STARTUP
+        value: "false"
+      # Demo voice guard (hard limits; the public admin screen can only lower the budget)
+      - key: DEMO_VOICE_BUDGET_CAP_USD
+        value: "5"
+      - key: DEMO_VOICE_MAX_CALL_SECONDS
+        value: "180"
+      - key: DEMO_VOICE_MAX_CALLS_PER_DAY
+        value: "25"
+      - key: DEMO_VOICE_CALLS_PER_IP_PER_HOUR
+        value: "3"
+      # Cheaper model/voice for the demo (confirm by listening; see docs/demo-deployment.md)
+      - key: MODEL_PROVIDER
+        value: openai
+      - key: MODEL_NAME
+        value: gpt-4.1-mini
+      - key: VAPI_PHONE_AREA_CODE
+        value: "713"
+      # --- set these in the dashboard ---
+      - key: DATABASE_URL
+        sync: false # demo Supabase project, session pooler, postgresql+asyncpg://...
+      - key: PUBLIC_API_URL
+        sync: false # https://bileksa-demo-api.onrender.com (or api-demo.your-domain)
+      - key: FRONTEND_URL
+        sync: false # https://demo.your-domain or https://<project>.pages.dev
+      - key: CORS_ORIGINS
+        sync: false # same as FRONTEND_URL
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: VAPI_PRIVATE_KEY
+        sync: false
+      - key: VAPI_PUBLIC_KEY
+        sync: false # restrict it in Vapi to the demo origin + demo assistant
+      - key: VAPI_WEBHOOK_SECRET
+        sync: false
+      - key: VAPI_TOOL_IDS
+        sync: false
+      - key: INTERNAL_SWEEP_SECRET
+        sync: false
+      - key: DEMO_OWNER_PASSWORD
+        sync: false # published on the demo page on purpose; don't reuse anywhere
+      - key: DEMO_ADMIN_PASSWORD
+        sync: false # published on the demo page on purpose; don't reuse anywhere

@@ -1,0 +1,26 @@
+# secrets
+.env
+.env.*
+!.env.example
+!.env.demo.example
+*.pem
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# node / next
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+# os / editors
+.DS_Store
+.idea/
+.vscode/
+# build artefacts
+*.zip
+e2e/screenshots/*FAIL*.png
+e2e/logs/
