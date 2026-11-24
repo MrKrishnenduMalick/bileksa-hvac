@@ -49,7 +49,9 @@ async def test_overview_metrics_match_rows(client, fake_vapi):
     assert m["missed_or_failed_calls"] == 1  # k4: no conversation
     assert m["answered_calls"] == 3
     assert m["leads_captured"] == 2  # k1 lead + k3 emergency lead
-    assert m["callback_requests"] == 1
+    # k1's callback + k3's emergency: no transfer was possible, so an urgent callback is
+    # requested automatically the moment the emergency is reported (template v3)
+    assert m["callback_requests"] == 2
     assert m["human_transfers"] == 1
     assert m["urgent_calls"] == 1
     assert m["minutes_used"] == round((120 + 60 + 90 + 3) / 60, 1)
@@ -66,8 +68,9 @@ async def test_calls_leads_callbacks_and_status_updates(client, fake_vapi):
     k1 = next(c for c in calls["items"] if c["reference"] == "k1")
     assert k1["lead_created"] and k1["callback_requested"]
     callbacks = (await client.get("/api/leads?callbacks=true", headers=h)).json()
-    assert len(callbacks) == 1
-    lead_id = callbacks[0]["id"]
+    assert len(callbacks) == 2  # k1 + the k3 emergency's automatic urgent callback
+    assert sorted(c["urgency"] for c in callbacks) == ["emergency", "normal"]
+    lead_id = next(c["id"] for c in callbacks if c["urgency"] != "emergency")
     r = await client.patch(
         f"/api/leads/{lead_id}",
         json={"status": "contacted", "callback_status": "done", "note": "Booked Tue"},

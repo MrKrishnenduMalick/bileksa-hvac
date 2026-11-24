@@ -17,28 +17,13 @@ from app.services.audit import mask_phone
 from app.services.business_info import open_status
 from app.services.notify import notify
 from app.validation import clean_text, normalize_us_phone, normalize_zip
+from app.vapi.template import EQUIPMENT_ENUM, SERVICE_ENUM
 
 URGENCY = ("normal", "soon", "urgent", "emergency")
-SERVICE_TYPES = (
-    "ac_repair",
-    "heating_repair",
-    "installation",
-    "maintenance",
-    "thermostat",
-    "emergency",
-    "other",
-)
-EQUIPMENT_TYPES = (
-    "central_ac",
-    "heat_pump",
-    "furnace",
-    "boiler",
-    "mini_split",
-    "thermostat",
-    "ductwork",
-    "other",
-    "unknown",
-)
+# Single source of truth with the tool definitions. Existing values are never removed or renamed
+# (they are stored on leads); new HVAC categories are appended there.
+SERVICE_TYPES = tuple(SERVICE_ENUM)
+EQUIPMENT_TYPES = tuple(EQUIPMENT_ENUM)
 CUSTOMER_TYPES = ("new", "existing")
 OPEN_STATUSES = ("new", "contacted", "in_progress")
 
@@ -258,55 +243,163 @@ async def transfer_destinations(
     return _distinct([first, business.transfer_number, business.fallback_number])
 
 
+async def _record_emergency(
+    session: AsyncSession,
+    business: Business,
+    call: Call,
+    rule: dict,
+    description: str | None,
+    *,
+    transferring: bool,
+    source: str,
+) -> tuple[bool, Lead, bool]:
+    """Mark the call and lead as an emergency, alert the owner once and, unless a transfer is
+    about to happen, make sure an urgent callback exists. Safe to repeat for the same call:
+    the alert is de-duplicated by key and the callback is only requested once.
+    Returns (first_report, lead, callback_requested_now). The caller commits."""
+    first_report = not call.urgent
+    call.urgent = True
+    if first_report or call.emergency_type in (None, "other"):
+        call.emergency_type = rule["key"][:30]
+    lead = await lead_for_call(session, call)
+    assert lead is not None
+    lead.urgency = "emergency"
+    lead.service_type = lead.service_type or "emergency"
+    if description:
+        lead.issue_summary = lead.issue_summary or clean_text(description, 1000)
+    if first_report:
+        session.add(_event(lead, "emergency", rule["label"]))
+    callback_now = False
+    if not transferring and lead.callback_status != "requested":
+        lead.callback_status = "requested"
+        lead.callback_reason = clean_text(f"EMERGENCY: {rule['label']}", 300)
+        session.add(_event(lead, "callback_requested", "Emergency: call back as soon as possible"))
+        callback_now = True
+    caller = mask_phone(call.caller_number) or "unknown number"
+    if source == "after_call":
+        body = (
+            f"A caller ({caller}) reported: {rule['label']}. The call ended before the AI "
+            "recorded it as an emergency. An urgent callback has been requested; call them back "
+            "now and check the call summary in the dashboard."
+        )
+    else:
+        body = (
+            f"A caller ({caller}) reported: {rule['label']}. "
+            + (
+                "The AI is transferring the call to your team now. Call back if the transfer "
+                "did not connect. "
+                if transferring
+                else "No transfer was possible, so an urgent callback has been requested: call "
+                "them back now. "
+            )
+            + "Details and the call summary will follow when the call ends."
+        )
+    await notify(
+        session,
+        audience="owner",
+        kind="emergency",
+        title=f"EMERGENCY call: {rule['label']}",
+        body=body,
+        business_id=business.id,
+        dedupe_key=f"emergency:{call.id}",
+    )
+    return first_report, lead, callback_now
+
+
 async def emergency_routing(
     session: AsyncSession, business: Business, call: Call, args: dict
 ) -> dict:
+    """Called by the assistant the moment it recognises an emergency, before or while it gives
+    the short safety instructions. Everything is recorded and committed before this returns, so
+    the emergency, the owner alert and (when no transfer is possible) the urgent callback stand
+    even if the caller hangs up straight away."""
     rule = emergency_rules.find_rule(
         business.emergency_rules,
         str(args.get("emergency_type") or "")[:40],
         str(args.get("custom_category") or "")[:60],
     )
-    first_report = not call.urgent
-    call.urgent = True
-    call.emergency_type = rule["key"][:30]
-    lead = await lead_for_call(session, call)
-    assert lead is not None
-    lead.urgency = "emergency"
-    lead.service_type = lead.service_type or "emergency"
-    if args.get("description"):
-        lead.issue_summary = lead.issue_summary or clean_text(args["description"], 1000)
-    session.add(_event(lead, "emergency", rule["label"]))
     destinations = []
     if rule["transfer"] and business.emergency_preference == "transfer_then_callback":
         destinations = await transfer_destinations(session, business, emergency=True)
-    if first_report:
-        caller = mask_phone(call.caller_number) or "unknown number"
-        await notify(
-            session,
-            audience="owner",
-            kind="emergency",
-            title=f"EMERGENCY call: {rule['label']}",
-            body=f"A caller ({caller}) reported: {rule['label']}. "
-            + ("The AI is transferring the call to your emergency line. " if destinations else "")
-            + "Details and the call summary will follow when the call ends. Check the dashboard "
-            "and call back if the transfer did not connect.",
-            business_id=business.id,
-            dedupe_key=f"emergency:{call.id}",
-        )
+    first_report, lead, _ = await _record_emergency(
+        session,
+        business,
+        call,
+        rule,
+        str(args.get("description") or ""),
+        transferring=bool(destinations),
+        source="live_tool",
+    )
     await session.commit()
     result: dict = {
         "success": True,
         "recorded": True,
+        "already_recorded": not first_report,
         "category": rule["label"],
         "transfer_allowed": bool(destinations),
-        "next": "use transferCall now"
-        if destinations
-        else "collect name, confirmed callback number and address, then create_callback_request "
-        "with urgency emergency",
+        "callback_requested": lead.callback_status == "requested",
     }
+    if destinations:
+        result["next"] = (
+            "finish the safety instructions in one or two short sentences, then use "
+            "transferCall now; do not collect other details first"
+        )
+        result["say"] = "I'm connecting you with our team now."
+    else:
+        result["next"] = (
+            "the emergency is recorded and an urgent callback is requested. If the caller is "
+            "safe and still on the line, confirm the best callback number and the address "
+            "(save_customer_lead); do not call create_callback_request again"
+        )
+        result["say"] = (
+            "I've flagged this as an emergency and asked our team to call you back as soon as "
+            "possible."
+        )
     if rule["instructions"]:
         result["additional_instructions"] = rule["instructions"]
         result["read_instructions"] = "read additional_instructions to the caller exactly"
     if not destinations and business.after_hours_message:
         result["after_hours_message"] = business.after_hours_message
     return result
+
+
+def structured_emergency(data: dict) -> str | None:
+    """Emergency key from Vapi's end-of-call structured data, or None. Only an explicit
+    safety-hazard flag counts (a caller calling an ordinary breakdown "an emergency" does not)."""
+    if not isinstance(data, dict) or data.get("emergency") is not True:
+        return None
+    key = str(data.get("emergency_type") or "other")[:40]
+    return key if key in emergency_rules.BUILTIN else "other"
+
+
+async def emergency_after_call(
+    session: AsyncSession, business: Business, call: Call, data: dict
+) -> None:
+    """Safety net at the end of the call (the caller commits):
+    - an emergency the AI never recorded (e.g. the caller left the building first) is
+      recorded now, with one owner alert and one urgent callback;
+    - a recorded emergency where no transfer was even started (the caller hung up before it)
+      gets an urgent callback if it has none yet."""
+    key = None if call.urgent else structured_emergency(data)
+    if key is not None:
+        rule = emergency_rules.find_rule(business.emergency_rules, key)
+        await _record_emergency(
+            session,
+            business,
+            call,
+            rule,
+            str(data.get("issue_summary") or "")[:1000],
+            transferring=False,
+            source="after_call",
+        )
+        return
+    if call.urgent and call.transfer_status in ("none", "not_allowed"):
+        lead = await lead_for_call(session, call)
+        assert lead is not None
+        if lead.callback_status != "requested":
+            lead.callback_status = "requested"
+            lead.callback_reason = "EMERGENCY: the call ended before a transfer"
+            lead.urgency = "emergency"
+            session.add(
+                _event(lead, "callback_requested", "Emergency: call back as soon as possible")
+            )

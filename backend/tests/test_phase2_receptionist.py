@@ -202,19 +202,23 @@ async def test_emergency_routing_marks_urgent_and_follows_preference(client, fak
         headers=admin_headers(),
     )
     _, r = await call_tool(client, "check_emergency_routing", {"emergency_type": "co"}, aid, "em2")
-    assert r["transfer_allowed"] is False and "create_callback_request" in r["next"]
+    # no transfer: the urgent callback is requested by the tool itself, not left to the AI
+    assert r["transfer_allowed"] is False and r["callback_requested"] is True
 
 
 async def test_safety_block_is_fixed_in_every_assistant(client, fake_vapi):
     await ready_business(client, fake_vapi)
     a = next(iter(fake_vapi.assistants.values()))
-    system = a["model"]["messages"][0]["content"]
+    system = " ".join(a["model"]["messages"][0]["content"].split())
     for phrase in (
         "gas",
         "carbon monoxide",
         "911",
         "Never diagnose",
-        "Give these instructions FIRST",
+        # v3: the emergency is recorded at once, in the same turn as the first safety sentence
+        "Act at once",
+        "In the SAME turn, say one short safety sentence and call check_emergency_routing",
+        "Give them even if a tool fails",
         "invent safety instructions",
     ):
         assert phrase.lower() in system.lower()

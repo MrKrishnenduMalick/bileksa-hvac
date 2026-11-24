@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from app import db
 from app.models import AuditLog, Business, Call, Lead, Notification
 from app.services import notify, usage
+from app.vapi.template import TEMPLATE_VERSION
 from tests.conftest import ADMIN_EMAIL, VAPI_HEADERS, admin_headers, auth, ensure_admin
 from tests.helpers import call_tool, end_report, ready_business
 
@@ -794,7 +795,7 @@ async def test_vapi_tool_sync_creates_then_updates_by_name(client, fake_vapi):
     r = await client.post("/admin/api/vapi/tools/sync", headers=ah)
     assert r.json()["created"] == [] and len(fake_vapi.tools) == 8
     status = (await client.get("/admin/api/vapi/tools", headers=ah)).json()
-    assert status["missing"] == [] and status["template_version"] == 2
+    assert status["missing"] == [] and status["template_version"] == TEMPLATE_VERSION
     # the sweep re-syncs assistants with the stored tool ids
     await client.post("/internal/sweep", headers=SWEEP)
     assistant = fake_vapi.assistants[aid]

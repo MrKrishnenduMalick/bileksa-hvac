@@ -181,7 +181,10 @@ async def process_end_of_call(session: AsyncSession, call: Call, message: dict) 
             "issue_summary": data.get("issue_summary"),
             "urgency": data.get("urgency"),
             "equipment_type": data.get("equipment_type"),
+            "service_type": data.get("service_type"),
         }
+        if data.get("property_type") in ("commercial", "industrial"):
+            fallback["notes"] = f"Site type: {data['property_type']}"
         if lead is None or not lead.callback_number:
             fallback["callback_number"] = data.get("callback_number")
         await leads.save_lead(
@@ -196,6 +199,12 @@ async def process_end_of_call(session: AsyncSession, call: Call, message: dict) 
             await leads.request_appointment(
                 session, call, {"preferred_time_text": data.get("preferred_appointment_time")}
             )
+    # Emergency safety net: record an emergency the AI didn't get to record, and make sure
+    # every emergency without a transfer has an urgent callback (no duplicate alert/callback).
+    await leads.emergency_after_call(
+        session, business, call, data if isinstance(data, dict) else {}
+    )
+    lead = await leads.lead_for_call(session, call, create=False)
     if call.transfer_status == "failed" and lead is not None and lead.callback_status == "none":
         # The caller wanted a person and didn't get one: make sure the team calls back.
         await leads.request_callback(session, call, {"reason": "Transfer did not connect"})

@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.2.0 — receptionist template v3 (unreleased)
+
+US/Houston receptionist improvements. No database migration; existing clients, leads, tools
+and assistants stay compatible.
+
+- **Emergencies first:** the assistant records the emergency (`check_emergency_routing`) in the
+  same turn as its first safety sentence. When no transfer is possible the tool itself requests
+  the urgent callback, so the alert and callback exist even if the caller hangs up at once.
+  End-of-call safety net: an emergency the AI never recorded is recorded from the call summary,
+  and an emergency that ended before any transfer gets an urgent callback. One owner alert and
+  one callback per call, however often the tool or the report repeats.
+- New standard emergency categories: refrigerant leak; walk-in cooler or freezer failure.
+  "Smoke" is now labelled "Smoke or fire". Stored client rules are unchanged.
+- **Whole HVAC industry:** call-intent classification (repair, maintenance, installation,
+  replacement, estimate, inspection, IAQ, ventilation, refrigeration, commercial/industrial,
+  existing appointment); more service and equipment types (old values kept); broader word
+  matching for service look-ups; site type kept in the after-call fallback.
+- **Conversation:** short turns, one question at a time, no re-asking, numbers read in groups,
+  ask to repeat instead of guessing, no announcing actions before they happen.
+- **Tools:** clearer descriptions and field help; save the lead once, then only for new details;
+  one callback per call.
+- **Voice:** voice, model and transcriber unchanged. Optional speech settings (turn-taking,
+  interruptions, silence timeout, Deepgram keyterms and smart format) are off by default and
+  validated; see `docs/live-call-tests.md`.
+- `TEMPLATE_VERSION` 3: run "Sync Vapi Tools", then the sweep re-syncs every assistant.
+
 ## 2.1.0 — 23 November 2026
 
 Deployment round (audit: `docs/final-audit.md`).
