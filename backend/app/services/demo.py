@@ -463,13 +463,9 @@ async def ensure_seeded(session: AsyncSession) -> None:
     if b is None:
         await seed(session)
         return
-    has_owner = (
-        await session.execute(
-            select(BusinessMember.user_id).where(BusinessMember.business_id == b.id)
-        )
-    ).first()
-    if has_owner is None:
-        await _ensure_accounts(session, b)
+    # Always repair published demo credentials on startup. This keeps the public demo
+    # sign-ins predictable after env changes and restores them if a visitor changes them.
+    await _ensure_accounts(session, b)
 
 
 # ---------- live voice with a budget ----------
