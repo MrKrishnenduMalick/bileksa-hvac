@@ -36,6 +36,7 @@ MAX_BODY_BYTES = 256 * 1024
 async def lifespan(app: FastAPI):
     s = get_settings()
     task = None
+    log.info("startup config: environment=%s demo_mode=%s", s.environment, s.demo_mode)
     if s.environment != "test":
         from app.db import sessionmaker  # noqa: PLC0415
         from app.services.catalog import ensure_defaults  # noqa: PLC0415
@@ -46,7 +47,11 @@ async def lifespan(app: FastAPI):
                 if s.demo_mode:
                     from app.services.demo import ensure_seeded  # noqa: PLC0415
 
+                    log.info("demo seeding: starting")
                     await ensure_seeded(session)
+                    log.info("demo seeding: completed")
+                else:
+                    log.info("demo seeding: skipped (DEMO_MODE is false)")
         except Exception:
             log.exception("could not ensure catalog defaults")
     if s.run_sweep_on_startup and s.environment != "test":
