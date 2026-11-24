@@ -36,6 +36,7 @@ MAX_BODY_BYTES = 256 * 1024
 async def lifespan(app: FastAPI):
     s = get_settings()
     task = None
+    log.info("startup config: environment=%s demo_mode=%s", s.environment, s.demo_mode)
     if s.environment != "test":
         from app.db import sessionmaker  # noqa: PLC0415
         from app.services.catalog import ensure_defaults  # noqa: PLC0415
@@ -43,10 +44,23 @@ async def lifespan(app: FastAPI):
         try:
             async with sessionmaker()() as session:
                 await ensure_defaults(session)
+                from sqlalchemy import text  # noqa: PLC0415
+                from sqlalchemy.engine import make_url  # noqa: PLC0415
+                db_url = make_url(s.database_url)
+                supabase_host = make_url(s.supabase_url).host if s.supabase_url else "unset"
+                log.info("startup connection target: db_host=%s db_port=%s db_name=%s db_user=%s supabase_host=%s", db_url.host, db_url.port, db_url.database, db_url.username, supabase_host)
+                db_identity = (await session.execute(text("SELECT current_database(), current_schema(), current_user"))).one()
+                before_count = (await session.execute(text("SELECT COUNT(*) FROM businesses"))).scalar_one()
+                log.info("startup database identity: database=%s schema=%s user=%s businesses_before=%s", *db_identity, before_count)
                 if s.demo_mode:
                     from app.services.demo import ensure_seeded  # noqa: PLC0415
 
+                    log.info("demo seeding: starting")
                     await ensure_seeded(session)
+                    after_count = (await session.execute(text("SELECT COUNT(*) FROM businesses"))).scalar_one()
+                    log.info("demo seeding: completed businesses_after=%s", after_count)
+                else:
+                    log.info("demo seeding: skipped (DEMO_MODE is false)")
         except Exception:
             log.exception("could not ensure catalog defaults")
     if s.run_sweep_on_startup and s.environment != "test":

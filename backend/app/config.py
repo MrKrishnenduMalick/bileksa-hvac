@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     model_name: str = "gpt-4.1"
     transcriber_provider: str = "deepgram"
     transcriber_model: str = "nova-3"
+    # Optional voice-pipeline tuning. All OFF/empty by default: nothing is sent to Vapi and its
+    # own defaults apply, exactly as before. Values are read as text and validated when the
+    # assistant is built; an invalid value is ignored (logged), never sent, so it can't break
+    # calls or app start-up. See docs/live-call-tests.md before enabling any of them.
+    speech_wait_seconds: str = ""  # startSpeakingPlan.waitSeconds, 0-2
+    speech_smart_endpointing: str = (
+        ""  # startSpeakingPlan.smartEndpointingPlan.provider: vapi|livekit
+    )
+    speech_stop_num_words: str = ""  # stopSpeakingPlan.numWords, 0-5
+    speech_stop_backoff_seconds: str = ""  # stopSpeakingPlan.backoffSeconds, 0-10
+    silence_timeout_seconds: str = ""  # silenceTimeoutSeconds, 10-3600
+    transcriber_keyterms: str = ""  # "true": Deepgram Nova-3 keyterm boosting (HVAC words, name)
+    transcriber_smart_format: str = ""  # "true": Deepgram smartFormat (numbers, dates)
 
     # Provisioning timing (section 3 of the plan)
     provisioning_lease_s: int = 300

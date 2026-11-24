@@ -11,13 +11,18 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
+# Keys are stored in calls.emergency_type and in each client's emergency_rules: never rename or
+# reorder existing keys. New categories are appended; clients without a stored rule for them
+# get the defaults (transfer allowed, no extra instructions).
 BUILTIN = {
     "gas": "Gas smell",
     "co": "Carbon monoxide alarm",
-    "smoke": "Smoke",
+    "smoke": "Smoke or fire",
     "burning_smell": "Burning electrical smell",
     "sparks": "Electrical sparks",
     "dangerous_malfunction": "Dangerous HVAC malfunction",
+    "refrigerant_leak": "Refrigerant leak",
+    "refrigeration_failure": "Walk-in cooler or freezer failure",
 }
 MAX_CUSTOM = 10
 
